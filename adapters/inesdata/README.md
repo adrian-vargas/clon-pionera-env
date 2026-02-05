@@ -1,6 +1,6 @@
 ### Arquitectura del ambiente de pruebas (lectura rápida)
 
-![Arquitectura del ambiente de pruebas A5.2](docs/arquitectura-ambiente-pruebas.png)
+![Arquitectura del ambiente de pruebas A5.2](blob/docs/arquitectura-ambiente-pruebas.png)
 
 Este repositorio soporta el ambiente de pruebas de PIONERA para PT5 – A5.2.
 La arquitectura está pensada como un entorno de validación reproducible.

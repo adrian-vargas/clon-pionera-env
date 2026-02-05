@@ -1,3 +1,30 @@
+### Arquitectura del ambiente de pruebas (lectura rápida)
+
+![Arquitectura del ambiente de pruebas A5.2](docs/arquitectura-ambiente-pruebas.png)
+
+Este repositorio soporta el ambiente de pruebas de PIONERA para PT5 – A5.2.
+La arquitectura está pensada como un entorno de validación reproducible.
+
+Espacio de datos de referencia: INESData
+
+- Los roles de Provider y Consumer se instancian dentro del espacio de datos (INESData).
+- Los componentes PIONERA operan fuera del plano de interoperabilidad del espacio de datos.
+- El protocolo de interoperabilidad se utiliza exclusivamente entre los conectores del espacio de datos.
+- Los resultados del AI Model Hub quedan fuera del plano del espacio de datos y se consumen a nivel de aplicación vía API.
+
+Componentes PIONERA:
+- Ontology Hub: gestiona ontologías y modelos semánticos. No consume datasets ni interactúa con componentes de IA directamente.
+- Semantic Virtualizer: consume datasets instrumentales y aplica semántica. Es el único punto de acceso a los datos desde el espacio de datos.
+- AI Model Hub: consume datos virtualizados una vez autorizado el acceso y ejecuta modelos de IA. Sus resultados quedan fuera del plano de interoperabilidad del espacio de datos.
+
+Otros elementos:
+- Los datasets son instrumentales y solo alimentan al Semantic Virtualizer.
+- El Provider Connector accede al Semantic Virtualizer mediante APIs internas (HTTP/SPARQL).
+- El protocolo de interoperabilidad (DSP) se utiliza exclusivamente entre Provider y Consumer.
+- Un portal unificado actúa como capa de visualización (resultados de IA y estado del Consumer), sin participar en mecanismos del espacio de datos.
+
+---
+
 # Despliegue reproducible de un demo de INESData para validación en PIONERA
 
 Este documento describe el flujo completo, reproducible y mayoritariamente automatizado para desplegar un demo de INESData en un entorno de pruebas basado en WSL, el cual debe estar habilitado en el sistema anfitrión. INESData se integra en el ecosistema PIONERA con el objetivo de servir como escenario instrumental para la validación técnica de componentes en la actividad A5.2.

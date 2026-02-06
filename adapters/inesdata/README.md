@@ -189,6 +189,12 @@ El clúster Minikube se encuentra en estado Running y los pods del namespace ing
 ### Propósito
 Proporcionar a INESData un conjunto mínimo de servicios comunes operativos, necesarios para habilitar la creación y gestión de dataspaces y conectores. Este nivel establece el estado base requerido del sistema para poder ejecutar de forma controlada los escenarios de validación definidos en la actividad A5.2.
 
+
+> **Precondiciones técnicas:**  
+> El entorno debe disponer de kubectl y helm operativos, así como de los artefactos de configuración requeridos para los servicios comunes. Estas precondiciones son verificadas automáticamente por el script.
+> Clonar este repositorio e ingresar a la carpeta `pionera-env/` (`clon-pionera-env`)
+
+Este comando despliega los servicios comunes de INESData de forma no interactiva, idempotente y QA-safe, aplicando validaciones previas y mecanismos de limpieza controlada en caso de fallo.
 ---
 
 ### Ruta
@@ -196,36 +202,51 @@ Proporcionar a INESData un conjunto mínimo de servicios comunes operativos, nec
 pionera-env/
 ```
 
-### Ejecutar `install.py` (automatización)
-> **Precondiciones técnicas:**  
-> El entorno debe disponer de kubectl y helm operativos, así como de los artefactos de configuración requeridos para los servicios comunes. Estas precondiciones son verificadas automáticamente por el script.
-> Clonar este repositorio e ingresar a la carpeta `pionera-env/` (`clon-pionera-env`)
+### Eliminar credsStore
+Desvincular WSL de Docker desktop
 
-Este comando despliega los servicios comunes de INESData de forma no interactiva, idempotente y QA-safe, aplicando validaciones previas y mecanismos de limpieza controlada en caso de fallo.
 
 ```bash
-python adapters/inesdata/install.py
+nano ~/.docker/config.json
+# Dejar vacía la configuración
+# Antes
+{
+  "credsStore": "desktop"
+}
+# Después
+{}
+
+```
+
+
+
+### Instalar los siguientes repositorios es necesario en INESData
+```bash
+helm repo add minio https://charts.min.io/
+helm repo add hashicorp https://helm.releases.hashicorp.com
+helm repo update
+```
+
+### Ejecutar `install.py` (automatización)
+
+```bash
+pip install PyYAML
+python3 adapters/inesdata/bootstrap.py
+python3 adapters/inesdata/normalize/normalize-base.py
+python3 adapters/inesdata/install.py # Esperar algunos minutos
 ```
 
 ### Verificación
 ```bash
-kubectl get pods -A
+kubectl get pods -n common-srvs
 ```
 **Ejemplo de salida esperada**
 ```text
-$ kubectl get pods -A
-NAMESPACE       NAME                                        READY   STATUS      RESTARTS      AGE
-ingress-nginx   ingress-nginx-admission-create-c9cnq        0/1     Completed   0             14m
-ingress-nginx   ingress-nginx-admission-patch-zkkdm         0/1     Completed   0             14m
-ingress-nginx   ingress-nginx-controller-8675c6b56f-qkqmx   1/1     Running     0             14m
-kube-system     coredns-7d764666f9-c264s                    1/1     Running     0             15m
-kube-system     coredns-7d764666f9-w2s6s                    1/1     Running     0             15m
-kube-system     etcd-minikube                               1/1     Running     0             15m
-kube-system     kube-apiserver-minikube                     1/1     Running     0             15m
-kube-system     kube-controller-manager-minikube            1/1     Running     0             15m
-kube-system     kube-proxy-z82wn                            1/1     Running     0             15m
-kube-system     kube-scheduler-minikube                     1/1     Running     0             15m
-kube-system     storage-provisioner                         1/1     Running     1 (14m ago)   15m
+NAME                                   READY   STATUS    RESTARTS   AGE
+common-srvs-postgresql-0               1/1     Running   0          2m
+common-srvs-keycloak-0                 1/1     Running   0          2m
+common-srvs-vault-0                    1/1     Running   0          2m
+common-srvs-minio-0                    1/1     Running   0          2m
 ```
 **Criterio de aceptación**
 Todos los pods del namespace common-srvs se encuentran en estado Running.
@@ -239,6 +260,15 @@ Garantizar que Vault se encuentra correctamente inicializado y operativo, habili
 ### Ruta
 ```text
 pionera-env/
+```
+
+
+> **Precondiciones técnicas:** 
+> Instalar Vault
+```bash
+wget -O - https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(grep -oP '(?<=UBUNTU_CODENAME=).*' /etc/os-release || lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt update && sudo apt install vault
 ```
 
 ### Inicialización de Vault (una sola vez)
@@ -269,7 +299,9 @@ Este script realiza de forma no interactiva e idempotente las siguientes accione
 
 ```bash
 cd ../../../..
-python adapters/inesdata/normalize/post-common.py
+kubectl exec -it common-srvs-vault-0 -n common-srvs -- vault operator unseal <unseal_keys_hex>
+cd ../../../..
+python3 adapters/inesdata/normalize/post-common.py
 ```
 
 ### Verificación
@@ -318,8 +350,11 @@ runtime/workdir/inesdata-deployment/
 ### Preparación del entorno Python (una sola vez)
 Este entorno virtual aisla el deployer de dependencias y evita interferencias con el sistema anfitrión.
 ```bash
+sudo apt install python3.10-venv
 python3.10 -m venv venv
 source venv/bin/activate
+cd runtime/workdir/inesdata-deployment/
+
 pip install -r requirements.txt
 ```
 ### Precondiciones técnicas (túneles requeridos)
@@ -421,15 +456,26 @@ Este script se ejecuta de forma no interactiva, idempotente y QA-safe y:
 - fuerza un reinicio controlado del servicio para asegurar la correcta aplicación de la configuración,
 - garantiza la inicialización del esquema EDC requerido (`edc_participant`).
 ```bash
+kubectl create namespace demo
 python adapters/inesdata/dataspace/dataspace-deploy.py
 ```
 
 ### Verificación
 ```bash
+kubectl get ns demo
+
 kubectl get pods -n demo
 ```
 **Ejemplo de salida esperada**
 ```text
+
+$ kubectl create namespace demo
+namespace/demo created
+
+$ kubectl get ns demo
+NAME   STATUS   AGE
+demo   Active   10s
+
 NAME                                         READY   STATUS    RESTARTS   AGE
 demo-registration-service-xxxxxxxxxx-xxxxx   1/1     Running   0          1m
 ```

@@ -8,14 +8,16 @@ VERSIÓN CANÓNICA FINAL:
 - Reset DB QA-safe
 - Helm ejecutado en directorio correcto
 - ConfigMap + Secret garantizados (envFrom real)
-- Sin heredocs
 - Sin hostAliases
 - Sin dependencias implícitas
+- Credenciales PostgreSQL leídas desde Kubernetes (estado real)
 """
 
 import subprocess
 import sys
 import time
+import json
+import base64
 from pathlib import Path
 
 # =============================================================================
@@ -26,19 +28,19 @@ DATASPACE = "demo"
 NAMESPACE = DATASPACE
 RELEASE = f"{DATASPACE}-dataspace-s1"
 
-# PostgreSQL
+# PostgreSQL (COMMON)
 PG_NAMESPACE = "common-srvs"
 PG_POD = "common-srvs-postgresql-0"
 PG_ADMIN_USER = "postgres"
-PG_ADMIN_PASSWORD = "escila95"   # QA-only
+PG_SECRET = "common-srvs-postgresql"
 
 RS_DB = f"{DATASPACE}_rs"
 RS_USER = f"{DATASPACE}_rsusr"
-RS_PASSWORD = "demo_rs_pwd"
+RS_PASSWORD = "demo_rs_pwd"  # generado previamente (QA-safe)
 
 PG_SERVICE = "common-srvs-postgresql"
 
-# Recursos Kubernetes reales usados por el chart
+# Recursos Kubernetes usados por el chart
 CONFIGMAP = "demo-registration-service-config"
 SECRET = "demo-registration-service-secret"
 DEPLOYMENT = "demo-registration-service"
@@ -60,6 +62,26 @@ def run(cmd, check=True, cwd=None):
     print(f"\n▶ {' '.join(cmd)}")
     return subprocess.run(cmd, check=check, text=True, cwd=cwd)
 
+def get_postgres_password():
+    """
+    Lee el password real de PostgreSQL desde el Secret de Kubernetes.
+    Fuente de verdad: estado del clúster.
+    """
+    result = subprocess.run(
+        [
+            "kubectl", "get", "secret", PG_SECRET,
+            "-n", PG_NAMESPACE,
+            "-o", "json"
+        ],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+
+    secret = json.loads(result.stdout)
+    b64_pwd = secret["data"]["postgres-password"]
+    return base64.b64decode(b64_pwd).decode("utf-8")
+
 # =============================================================================
 # PRECONDICIONES
 # =============================================================================
@@ -73,31 +95,37 @@ def check_preconditions():
     print("✓ Entorno base presente")
 
 # =============================================================================
-# POSTGRES READY
+# POSTGRES READY (AUTORIDAD REAL)
 # =============================================================================
 
 def wait_for_postgres():
     header("NIVEL 6 – Esperando PostgreSQL READY")
+    password = get_postgres_password()
+
     for _ in range(30):
         try:
             run([
-                "kubectl", "exec", "-n", PG_NAMESPACE, PG_POD, "--",
-                "sh", "-c",
-                f"PGPASSWORD={PG_ADMIN_PASSWORD} "
+                "kubectl", "exec",
+                "-n", PG_NAMESPACE,
+                PG_POD,
+                "--", "sh", "-c",
+                f"PGPASSWORD={password} "
                 f"psql -U {PG_ADMIN_USER} -d postgres -c 'SELECT 1;'"
             ])
-            print("✓ PostgreSQL listo")
+            print("✓ PostgreSQL listo y accesible")
             return
         except subprocess.CalledProcessError:
-            time.sleep(2)
-    sys.exit("❌ PostgreSQL no disponible")
+            time.sleep(5)
+
+    sys.exit("❌ PostgreSQL no accesible tras múltiples intentos")
 
 # =============================================================================
-# RESET DB (SIN HEREDOCS)
+# RESET DB (QA-SAFE, SIN HEREDOCS)
 # =============================================================================
 
 def recreate_db():
     header("NIVEL 6 – Reset controlado DB")
+    password = get_postgres_password()
 
     sql_cmds = [
         f"DROP DATABASE IF EXISTS {RS_DB};",
@@ -108,9 +136,11 @@ def recreate_db():
 
     for sql in sql_cmds:
         run([
-            "kubectl", "exec", "-n", PG_NAMESPACE, PG_POD, "--",
-            "sh", "-c",
-            f"PGPASSWORD={PG_ADMIN_PASSWORD} "
+            "kubectl", "exec",
+            "-n", PG_NAMESPACE,
+            PG_POD,
+            "--", "sh", "-c",
+            f"PGPASSWORD={password} "
             f"psql -U {PG_ADMIN_USER} -d postgres -c \"{sql}\""
         ])
 
@@ -142,7 +172,6 @@ def ensure_configmap_and_secret():
 
     jdbc = f"jdbc:postgresql://{PG_SERVICE}.{PG_NAMESPACE}:5432/{RS_DB}"
 
-    # ConfigMap
     run([
         "sh", "-c",
         f"""
@@ -153,7 +182,6 @@ kubectl create configmap {CONFIGMAP} -n {NAMESPACE} \
 """
     ])
 
-    # Secret
     run([
         "sh", "-c",
         f"""
@@ -187,7 +215,7 @@ def main():
     restart_deployment()
 
     header("NIVEL 6 COMPLETADO (CANÓNICO)")
-    print("✔ DB garantizada")
+    print("✔ DB garantizada desde estado real del clúster")
     print("✔ Helm ejecutado correctamente")
     print("✔ ConfigMap / Secret alineados con Deployment")
     print("➡ Siguiente paso: Nivel 7 (connectors)")

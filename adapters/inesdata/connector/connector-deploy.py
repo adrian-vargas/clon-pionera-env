@@ -4,19 +4,12 @@ connector-deploy.py
 
 NIVEL 8 – Despliegue del Connector INESData para PIONERA
 
-Responsabilidades:
-- Verificar precondiciones reales
-- Parchear el chart Helm del connector (hostAliases Helm-safe)
-- Normalizar values.yaml del connector
-- Corregir hostname PostgreSQL para acceso cross-namespace
-- Desplegar el connector mediante Helm
-- Verificar despliegue básico
-
-Principios:
-- NO interactivo
+VERSIÓN CANÓNICA FINAL
+- hostAliases opcional (no obligatorio)
+- PostgreSQL vía DNS Kubernetes (FQDN)
+- Helm-safe
 - Idempotente
 - QA-safe
-- Reproducible
 """
 
 import subprocess
@@ -62,23 +55,15 @@ def require_file(path: Path, desc: str):
         sys.exit(f"❌ Falta {desc}: {path}")
 
 def backup(path: Path):
-    """
-    Crea backups QA-safe.
-    - Si el fichero está dentro de templates/, mueve el backup a templates/_backup/
-    - En otros casos, usa suffix .backup.TIMESTAMP
-    """
     if not path.exists():
         return
-
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
     if "templates" in path.parts:
         backup_dir = path.parent / "_backup"
         backup_dir.mkdir(exist_ok=True)
         bkp = backup_dir / f"{path.name}.{ts}.bak"
     else:
         bkp = path.with_suffix(path.suffix + f".backup.{ts}")
-
     bkp.write_text(path.read_text())
     print(f"✓ Backup creado: {bkp}")
 
@@ -93,11 +78,17 @@ def check_preconditions():
     print("✓ Precondiciones OK")
 
 # =============================================================================
-# FASE 8.2 – PARCHE HELM-SAFE DEL CHART
+# FASE 8.2 – PARCHE HELM-SAFE (OPCIONAL)
 # =============================================================================
 
 def patch_chart():
-    header("NIVEL 8 – Parche Helm-safe del chart")
+    header("NIVEL 8 – Parche Helm-safe del chart (opcional)")
+
+    text = TEMPLATE_FILE.read_text()
+
+    if "hostAliases" not in text:
+        print("ℹ️ Chart no usa hostAliases (OK, se omite parche)")
+        return
 
     old = """      hostAliases:
         - ip: "{{ .Values.hostAliases[0].ip }}"
@@ -110,21 +101,20 @@ def patch_chart():
 {{- end }}
 """
 
-    text = TEMPLATE_FILE.read_text()
-
     if new in text:
         print("✓ Chart ya parcheado (idempotente)")
         return
 
     if old not in text:
-        sys.exit("❌ Patrón hostAliases no encontrado (chart inesperado)")
+        print("⚠️ hostAliases detectado pero patrón desconocido — no se parchea")
+        return
 
     backup(TEMPLATE_FILE)
     TEMPLATE_FILE.write_text(text.replace(old, new))
     print("✓ Chart parcheado correctamente (Helm-safe)")
 
 # =============================================================================
-# FASE 8.3 – NORMALIZACIÓN DE VALUES.YAML
+# FASE 8.3 – NORMALIZACIÓN VALUES.YAML
 # =============================================================================
 
 def normalize_values():
@@ -135,12 +125,10 @@ def normalize_values():
 
     backup(VALUES_FILE)
 
-    # Garantizar hostAliases
     if "hostAliases:" not in text:
         text += "\nhostAliases: []\n"
         modified = True
 
-    # Corregir hostname PostgreSQL (cross-namespace)
     if f"hostname: {PG_SERVICE}" in text and PG_FQDN not in text:
         text = text.replace(
             f"hostname: {PG_SERVICE}",
@@ -151,12 +139,12 @@ def normalize_values():
 
     if modified:
         VALUES_FILE.write_text(text)
-        print("✓ values.yaml normalizado (Helm-safe)")
+        print("✓ values.yaml normalizado")
     else:
-        print("✓ values.yaml ya estaba normalizado (idempotente)")
+        print("✓ values.yaml ya correcto (idempotente)")
 
 # =============================================================================
-# FASE 8.4 – DESPLIEGUE HELM
+# FASE 8.4 – HELM
 # =============================================================================
 
 def deploy_helm():
@@ -173,13 +161,13 @@ def deploy_helm():
     )
 
 # =============================================================================
-# FASE 8.5 – VERIFICACIÓN BÁSICA
+# FASE 8.5 – VERIFICACIÓN
 # =============================================================================
 
 def verify():
     header("NIVEL 8 – Verificación básica")
     run(["kubectl", "get", "pods", "-n", NAMESPACE])
-    print("✓ Connector desplegado (verificando initContainers)")
+    print("✓ Connector desplegado (esperar initContainers si aplica)")
 
 # =============================================================================
 # MAIN
@@ -194,9 +182,8 @@ def main():
 
     header("NIVEL 8 COMPLETADO")
     print(f"✔ Connector '{CONNECTOR}' desplegado correctamente")
-    print("✔ Chart Helm corregido y reproducible")
-    print("✔ Acceso cross-namespace validado (PostgreSQL)")
-    print("➡ Esperar a que initContainers finalicen")
+    print("✔ Helm chart reproducible")
+    print("✔ PostgreSQL cross-namespace vía DNS Kubernetes")
 
 if __name__ == "__main__":
     main()

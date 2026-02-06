@@ -209,15 +209,23 @@ python adapters/inesdata/install.py
 
 ### Verificación
 ```bash
-kubectl get pods -n common-srvs
+kubectl get pods -A
 ```
 **Ejemplo de salida esperada**
 ```text
-NAME                                   READY   STATUS    RESTARTS   AGE
-common-srvs-postgresql-0               1/1     Running   0          2m
-common-srvs-keycloak-0                 1/1     Running   0          2m
-common-srvs-vault-0                    1/1     Running   0          2m
-common-srvs-minio-0                    1/1     Running   0          2m
+$ kubectl get pods -A
+NAMESPACE       NAME                                        READY   STATUS      RESTARTS      AGE
+ingress-nginx   ingress-nginx-admission-create-c9cnq        0/1     Completed   0             14m
+ingress-nginx   ingress-nginx-admission-patch-zkkdm         0/1     Completed   0             14m
+ingress-nginx   ingress-nginx-controller-8675c6b56f-qkqmx   1/1     Running     0             14m
+kube-system     coredns-7d764666f9-c264s                    1/1     Running     0             15m
+kube-system     coredns-7d764666f9-w2s6s                    1/1     Running     0             15m
+kube-system     etcd-minikube                               1/1     Running     0             15m
+kube-system     kube-apiserver-minikube                     1/1     Running     0             15m
+kube-system     kube-controller-manager-minikube            1/1     Running     0             15m
+kube-system     kube-proxy-z82wn                            1/1     Running     0             15m
+kube-system     kube-scheduler-minikube                     1/1     Running     0             15m
+kube-system     storage-provisioner                         1/1     Running     1 (14m ago)   15m
 ```
 **Criterio de aceptación**
 Todos los pods del namespace common-srvs se encuentran en estado Running.

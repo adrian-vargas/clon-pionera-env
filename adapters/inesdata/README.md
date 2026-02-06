@@ -94,6 +94,11 @@ Las siguientes herramientas deben estar instaladas y accesibles desde la termina
 ### Instalación de herramientas (si aplica)
 
 > Este bloque solo es necesario si las herramientas no están instaladas.
+> En Windows 10 hailitar wsl:
+>   1. Abrir PowerShell como administrador y ejecutar `wsl --install`. 
+>   2. Abrir CMD y ejecutar `wsl`
+>   3. Instalar una distribución Ubuntu reciente. Ejemplo: wsl --install -d Ubuntu-22.04
+>   4. Se puede elegir por defecto para evitar que arranque con la incluída en Docker. Ejemplo: `wsl --set-default Ubuntu-22.04`
 
 **Minikube (Linux / WSL):**
 ```bash

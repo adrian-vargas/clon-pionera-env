@@ -40,6 +40,35 @@ Este documento describe el flujo completo, reproducible y mayoritariamente autom
 
 ---
 
+## Configuración del entorno local (hosts)
+
+Para los despliegues locales del ambiente de pruebas, algunos servicios de INESData (por ejemplo, Keycloak, MinIO y los endpoints del conector) esperan que ciertos nombres de host estén disponibles mediante resolución DNS.
+
+En un entorno productivo, esta resolución se realizaría a través de la infraestructura DNS del clúster.  
+En el ambiente de pruebas A5.2, esta resolución se simula de forma local mediante el fichero `hosts`.
+
+Es necesario añadir las siguientes entradas al fichero `hosts` del sistema:
+
+### Linux / macOS
+Editar el fichero `/etc/hosts`
+
+### Windows
+Editar el fichero `C:\Windows\System32\drivers\etc\hosts`
+
+```text
+# Permite que el mismo contexto de Kubernetes funcione tanto desde el host como desde contenedores Docker:
+127.0.0.1 kubernetes.docker.internal
+
+# Fin de la sección
+127.0.0.1   keycloak.dev.ed.inesdata.upm
+127.0.0.1   keycloak-admin.dev.ed.inesdata.upm
+127.0.0.1   minio.dev.ed.inesdata.upm
+127.0.0.1   console.minio-s3.dev.ed.inesdata.upm
+127.0.0.1   registration-service-demo.dev.ds.inesdata.upm
+127.0.0.1   conn-oeg-demo.dev.ds.inesdata.upm
+```
+---
+
 # NIVEL 0 – Prerrequisitos del sistema (manual)
 > **Precondiciones técnicas:** 
 > - La ejecución de este flujo se realiza desde una terminal WSL.

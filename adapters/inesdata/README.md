@@ -199,6 +199,7 @@ pionera-env/
 ### Ejecutar `install.py` (automatización)
 > **Precondiciones técnicas:**  
 > El entorno debe disponer de kubectl y helm operativos, así como de los artefactos de configuración requeridos para los servicios comunes. Estas precondiciones son verificadas automáticamente por el script.
+> Clonar este repositorio e ingresar a la carpeta `pionera-env/` (`clon-pionera-env`)
 
 Este comando despliega los servicios comunes de INESData de forma no interactiva, idempotente y QA-safe, aplicando validaciones previas y mecanismos de limpieza controlada en caso de fallo.
 

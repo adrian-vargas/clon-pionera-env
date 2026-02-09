@@ -2,22 +2,15 @@
 """
 dataspace-deploy.py
 
-NIVEL 6 – Despliegue físico del Dataspace INESData (Step-1)
+NIVEL 6 – Despliegue del Dataspace INESData (Step-1) para PIONERA
 
-RESPONSABILIDADES:
-- Garantizar namespace Kubernetes
-- Limpiar workloads huérfanos (pre-Helm)
-- Esperar PostgreSQL usando credenciales reales del clúster
-- Resetear DB QA-safe (terminando sesiones)
-- Ejecutar Helm de forma idempotente
-- Garantizar ConfigMap + Secret reales
-- Reiniciar deployment controladamente
-
-PRINCIPIOS:
-- Fuente de verdad = estado del clúster
-- NO reutiliza dataspace-create.py
-- NO passwords hardcodeados
-- Idempotente y reproducible
+VERSIÓN CANÓNICA FINAL:
+- Reset DB QA-safe
+- Helm ejecutado en directorio correcto
+- ConfigMap + Secret garantizados (envFrom real)
+- Sin hostAliases
+- Sin dependencias implícitas
+- Credenciales PostgreSQL leídas desde Kubernetes (estado real)
 """
 
 import subprocess
@@ -35,7 +28,7 @@ DATASPACE = "demo"
 NAMESPACE = DATASPACE
 RELEASE = f"{DATASPACE}-dataspace-s1"
 
-# PostgreSQL (servicios comunes)
+# PostgreSQL (COMMON)
 PG_NAMESPACE = "common-srvs"
 PG_POD = "common-srvs-postgresql-0"
 PG_ADMIN_USER = "postgres"
@@ -43,14 +36,14 @@ PG_SECRET = "common-srvs-postgresql"
 
 RS_DB = f"{DATASPACE}_rs"
 RS_USER = f"{DATASPACE}_rsusr"
-RS_PASSWORD = "demo_rs_pwd"   # QA-safe (solo para demo)
+RS_PASSWORD = "demo_rs_pwd"  # generado previamente (QA-safe)
 
 PG_SERVICE = "common-srvs-postgresql"
 
-# Recursos Kubernetes gestionados
-DEPLOYMENT = "demo-registration-service"
+# Recursos Kubernetes usados por el chart
 CONFIGMAP = "demo-registration-service-config"
 SECRET = "demo-registration-service-secret"
+DEPLOYMENT = "demo-registration-service"
 
 ROOT = Path(__file__).resolve().parents[3]
 STEP1_DIR = ROOT / "runtime" / "workdir" / "inesdata-deployment" / "dataspace" / "step-1"
@@ -60,97 +53,64 @@ VALUES_FILE = STEP1_DIR / f"values-{DATASPACE}.yaml"
 # UTILIDADES
 # =============================================================================
 
-def header(title: str):
+def header(title):
     print("\n" + "=" * 80)
     print(title)
     print("=" * 80)
 
-def run(cmd, cwd=None, check=True):
+def run(cmd, check=True, cwd=None):
     print(f"\n▶ {' '.join(cmd)}")
-    return subprocess.run(cmd, cwd=cwd, check=check, text=True)
+    return subprocess.run(cmd, check=check, text=True, cwd=cwd)
 
 def get_postgres_password():
     """
-    Lee el password REAL de PostgreSQL desde el Secret de Kubernetes.
-    Fuente de verdad absoluta.
+    Lee el password real de PostgreSQL desde el Secret de Kubernetes.
+    Fuente de verdad: estado del clúster.
     """
     result = subprocess.run(
-        ["kubectl", "get", "secret", PG_SECRET, "-n", PG_NAMESPACE, "-o", "json"],
+        [
+            "kubectl", "get", "secret", PG_SECRET,
+            "-n", PG_NAMESPACE,
+            "-o", "json"
+        ],
         capture_output=True,
         text=True,
         check=True
     )
-    data = json.loads(result.stdout)
-    return base64.b64decode(data["data"]["postgres-password"]).decode("utf-8")
+
+    secret = json.loads(result.stdout)
+    b64_pwd = secret["data"]["postgres-password"]
+    return base64.b64decode(b64_pwd).decode("utf-8")
 
 # =============================================================================
-# FASE 6.0 – GARANTIZAR NAMESPACE
+# PRECONDICIONES
 # =============================================================================
 
-def ensure_namespace():
-    header("NIVEL 6 – Garantizando namespace Kubernetes")
-    subprocess.run(
-        ["kubectl", "create", "namespace", NAMESPACE],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
-    print(f"✓ Namespace '{NAMESPACE}' garantizado")
-
-# =============================================================================
-# FASE 6.1 – VERIFICACIÓN DE INPUTS
-# =============================================================================
-
-def check_inputs():
-    header("NIVEL 6 – Verificación de inputs")
-
-    if not VALUES_FILE.exists():
-        sys.exit(f"❌ Falta values.yaml: {VALUES_FILE}")
-
+def check_preconditions():
+    header("NIVEL 6 – Verificación de precondiciones")
+    run(["kubectl", "get", "ns", NAMESPACE])
     run(["kubectl", "get", "pod", PG_POD, "-n", PG_NAMESPACE])
-    print("✓ Inputs correctos")
+    if not VALUES_FILE.exists():
+        sys.exit(f"❌ Falta {VALUES_FILE}")
+    print("✓ Entorno base presente")
 
 # =============================================================================
-# FASE 6.2 – LIMPIEZA DEPLOYMENT HUÉRFANO (CRÍTICO)
-# =============================================================================
-
-def cleanup_orphan_deployment():
-    header("NIVEL 6 – Limpieza deployment huérfano (pre-Helm)")
-
-    result = subprocess.run(
-        ["kubectl", "get", "deployment", DEPLOYMENT, "-n", NAMESPACE, "-o", "json"],
-        capture_output=True,
-        text=True
-    )
-
-    if result.returncode != 0:
-        print("✓ No existe deployment previo")
-        return
-
-    data = json.loads(result.stdout)
-    annotations = data.get("metadata", {}).get("annotations", {})
-
-    if "meta.helm.sh/release-name" in annotations:
-        print("✓ Deployment gestionado por Helm (OK)")
-        return
-
-    print("⚠️ Deployment huérfano detectado → eliminando")
-    run(["kubectl", "delete", "deployment", DEPLOYMENT, "-n", NAMESPACE])
-
-# =============================================================================
-# FASE 6.3 – ESPERAR POSTGRESQL (AUTORIDAD REAL)
+# POSTGRES READY (AUTORIDAD REAL)
 # =============================================================================
 
 def wait_for_postgres():
     header("NIVEL 6 – Esperando PostgreSQL READY")
-
     password = get_postgres_password()
 
     for _ in range(30):
         try:
             run([
-                "kubectl", "exec", "-n", PG_NAMESPACE, PG_POD, "--",
-                "sh", "-c",
-                f"PGPASSWORD={password} psql -U {PG_ADMIN_USER} -d postgres -c 'SELECT 1;'"
+                "kubectl", "exec",
+                "-n", PG_NAMESPACE,
+                PG_POD,
+                "--", "sh", "-c",
+                f"PGPASSWORD={password} "
+                f"psql -U {PG_ADMIN_USER} -d postgres -c 'SELECT 1;'"
             ])
             print("✓ PostgreSQL listo y accesible")
             return
@@ -160,18 +120,14 @@ def wait_for_postgres():
     sys.exit("❌ PostgreSQL no accesible tras múltiples intentos")
 
 # =============================================================================
-# FASE 6.4 – RESET DB QA-SAFE
+# RESET DB (QA-SAFE, SIN HEREDOCS)
 # =============================================================================
 
 def recreate_db():
-    header("NIVEL 6 – Reset controlado de DB")
-
+    header("NIVEL 6 – Reset controlado DB")
     password = get_postgres_password()
 
     sql_cmds = [
-        f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-        f"WHERE datname = '{RS_DB}' AND pid <> pg_backend_pid();",
-
         f"DROP DATABASE IF EXISTS {RS_DB};",
         f"DROP ROLE IF EXISTS {RS_USER};",
         f"CREATE ROLE {RS_USER} LOGIN PASSWORD '{RS_PASSWORD}';",
@@ -180,33 +136,35 @@ def recreate_db():
 
     for sql in sql_cmds:
         run([
-            "kubectl", "exec", "-n", PG_NAMESPACE, PG_POD, "--",
-            "sh", "-c",
-            f"PGPASSWORD={password} psql -U {PG_ADMIN_USER} -d postgres -c \"{sql}\""
+            "kubectl", "exec",
+            "-n", PG_NAMESPACE,
+            PG_POD,
+            "--", "sh", "-c",
+            f"PGPASSWORD={password} "
+            f"psql -U {PG_ADMIN_USER} -d postgres -c \"{sql}\""
         ])
 
     print("✓ DB recreada correctamente")
 
 # =============================================================================
-# FASE 6.5 – HELM (CWD CORRECTO)
+# HELM (CWD CORRECTO)
 # =============================================================================
 
 def deploy_helm():
     header("NIVEL 6 – Helm Step-1")
-
     run(
         [
             "helm", "upgrade", "--install", RELEASE,
             "-n", NAMESPACE,
             "--create-namespace",
-            "-f", VALUES_FILE.name,
+            "-f", f"values-{DATASPACE}.yaml",
             "."
         ],
         cwd=STEP1_DIR
     )
 
 # =============================================================================
-# FASE 6.6 – CONFIGMAP / SECRET (FUENTE REAL)
+# CONFIGMAP / SECRET (FUENTE REAL)
 # =============================================================================
 
 def ensure_configmap_and_secret():
@@ -236,12 +194,11 @@ kubectl create secret generic {SECRET} -n {NAMESPACE} \
     print("✓ ConfigMap y Secret aplicados correctamente")
 
 # =============================================================================
-# FASE 6.7 – RESTART CONTROLADO
+# RESTART CONTROLADO
 # =============================================================================
 
 def restart_deployment():
     header("NIVEL 6 – Reinicio controlado del Deployment")
-
     run(["kubectl", "rollout", "restart", f"deployment/{DEPLOYMENT}", "-n", NAMESPACE])
     run(["kubectl", "rollout", "status", f"deployment/{DEPLOYMENT}", "-n", NAMESPACE])
 
@@ -250,9 +207,7 @@ def restart_deployment():
 # =============================================================================
 
 def main():
-    ensure_namespace()
-    check_inputs()
-    cleanup_orphan_deployment()
+    check_preconditions()
     wait_for_postgres()
     recreate_db()
     deploy_helm()
@@ -260,10 +215,10 @@ def main():
     restart_deployment()
 
     header("NIVEL 6 COMPLETADO (CANÓNICO)")
-    print("✔ Kubernetes limpio y coherente")
-    print("✔ DB alineada con estado real")
-    print("✔ Helm idempotente")
-    print("➡ Siguiente paso: Nivel 7 (connector-create.py)")
+    print("✔ DB garantizada desde estado real del clúster")
+    print("✔ Helm ejecutado correctamente")
+    print("✔ ConfigMap / Secret alineados con Deployment")
+    print("➡ Siguiente paso: Nivel 7 (connectors)")
 
 if __name__ == "__main__":
     main()

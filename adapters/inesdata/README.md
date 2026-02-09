@@ -300,6 +300,7 @@ Este script realiza de forma no interactiva e idempotente las siguientes accione
 ```bash
 cd ../../../..
 kubectl exec -it common-srvs-vault-0 -n common-srvs -- vault operator unseal <unseal_keys_hex>
+cd ../../../..
 python3 adapters/inesdata/normalize/post-common.py
 ```
 
@@ -405,8 +406,6 @@ Este script se ejecuta de forma no interactiva, idempotente y QA-safe y:
 - prepara artefactos consistentes para su uso en el despliegue Helm del NIVEL 6.
 
 ```bash
-cd ../../../
-python adapters/inesdata/dataspace/dataspace-reset.py # Resetea el espacio de datos si ya existe para evitar conflictos de autenticación
 python adapters/inesdata/dataspace/dataspace-create.py
 ```
 ### Verificación

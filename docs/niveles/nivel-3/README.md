@@ -46,7 +46,7 @@ Este script realiza de forma no interactiva e idempotente las siguientes accione
 ```bash
 cd ../../../..
 kubectl exec -it common-srvs-vault-0 -n common-srvs -- vault operator unseal <unseal_keys_hex>
-cd ../../../..
+mv runtime/workdir/inesdata-deployment/deployer.config.template runtime/workdir/inesdata-deployment/deployer.config
 python3 adapters/inesdata/normalize/post-common.py
 ```
 

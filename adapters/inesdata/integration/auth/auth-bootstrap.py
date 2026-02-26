@@ -19,8 +19,13 @@ import os
 # CONFIGURACIÓN GLOBAL
 # ==========================================================
 
-KEYCLOAK_BASE = "http://127.0.0.1:8080"
-REALM = "pionera"
+# ==========================================================
+# CONFIGURACIÓN GLOBAL
+# ==========================================================
+
+KEYCLOAK_BASE = os.environ.get("KC_URL")
+REALM = os.environ.get("DATASPACE_REALM", "demo")
+
 ADMIN_REALM = os.environ.get("KEYCLOAK_ADMIN_REALM", "master")
 
 ADMIN_USERNAME = os.environ.get("KEYCLOAK_ADMIN_USER", "admin")
@@ -60,12 +65,19 @@ def save_json(path, data):
 
 def ensure_keycloak():
     try:
-        r = requests.get(f"{KEYCLOAK_BASE}/realms/master", timeout=3)
-        if r.status_code != 200:
-            sys.exit("❌ Keycloak responde pero no está operativo")
-        log("Keycloak accesible")
-    except Exception:
-        sys.exit("❌ Keycloak no accesible (¿port-forward activo?)")
+        r = requests.get(
+            f"{KEYCLOAK_BASE}/realms/{ADMIN_REALM}/.well-known/openid-configuration",
+            timeout=5
+        )
+
+        if r.status_code == 200:
+            log("Keycloak accesible (OIDC endpoint OK)")
+            return
+
+        sys.exit(f"❌ Keycloak responde pero OIDC no disponible (status {r.status_code})")
+
+    except Exception as e:
+        sys.exit(f"❌ Keycloak no accesible ({e})")
 
 def port_open(port):
     s = socket.socket()

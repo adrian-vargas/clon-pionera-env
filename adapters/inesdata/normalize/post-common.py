@@ -164,6 +164,10 @@ def configure_vault(root_token):
 # GENERACIÓN deployer.config
 # =============================================================================
 
+# =============================================================================
+# GENERACIÓN deployer.config
+# =============================================================================
+
 def generate_deployer_config(root_token):
     header("NIVEL 3 – Generación de deployer.config")
 
@@ -179,19 +183,19 @@ PG_HOST=localhost
 PG_USER=postgres
 PG_PASSWORD={pg_password}
 KC_URL=http://localhost:8080
-KC_INTERNAL_URL=http://keycloak.dev.ed.inesdata.upm
+KC_INTERNAL_URL=http://common-srvs-keycloak.common-srvs.svc
 KC_USER=admin
 KC_PASSWORD={kc_password}
-VT_URL=http://localhost:8200
-VT_TOKEN={root_token}
-DATABASE_HOSTNAME=common-srvs-postgresql
 KEYCLOAK_HOSTNAME=keycloak.dev.ed.inesdata.upm
 KEYCLOAK_INTERNAL_HOSTNAME=common-srvs-keycloak.common-srvs.svc
-MINIO_HOSTNAME=minio.dev.ed.inesdata.upm
+VT_URL=http://localhost:8200
 VAULT_URL=http://common-srvs-vault.common-srvs.svc:8200
+VT_TOKEN={root_token}
+DATABASE_HOSTNAME=common-srvs-postgresql
+MINIO_HOSTNAME=minio.dev.ed.inesdata.upm
 """)
 
-    print("✓ deployer.config generado correctamente (estado real del clúster)")
+    print("✓ deployer.config generado correctamente (modelo federado PT5)")
 
 # =============================================================================
 # MAIN

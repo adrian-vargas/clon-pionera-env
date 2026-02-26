@@ -380,9 +380,40 @@ def nivel_3():
 
     print("✔ NIVEL 3 COMPLETADO CORRECTAMENTE")
 
-# ==========================================================
-# NIVEL 4
-# ==========================================================
+import socket
+import subprocess
+import time
+import os
+
+pf_processes = {}
+
+def kill_existing_port_forwards():
+    subprocess.run(["pkill", "-f", "kubectl port-forward"], check=False)
+
+
+def port_is_open(port):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def wait_for_port(port, timeout=15):
+    start = time.time()
+    while time.time() - start < timeout:
+        if port_is_open(port):
+            return True
+        time.sleep(1)
+    return False
+
+
+def start_port_forward(name, cmd, port):
+    print(f"🔌 Port-forward {name} en puerto {port}...")
+    process = subprocess.Popen(cmd, shell=True)
+    if not wait_for_port(port):
+        process.terminate()
+        raise RuntimeError(f"❌ No se pudo abrir el puerto {port}")
+    print(f"✓ {name} disponible en localhost:{port}")
+    return process
+
 
 def nivel_4():
     global pf_processes
@@ -390,33 +421,40 @@ def nivel_4():
     print("\n== NIVEL 4: Python + Ports ==")
 
     run("sudo apt install -y python3.10-venv")
+
     if not os.path.exists("venv"):
         run("python3.10 -m venv venv")
         run([
-        "venv/bin/pip",
-        "install",
-        "-r",
-        "runtime/workdir/inesdata-deployment/requirements.txt"
-    ])
+            "venv/bin/pip",
+            "install",
+            "-r",
+            "runtime/workdir/inesdata-deployment/requirements.txt"
+        ])
 
-    print("🔌 Iniciando port-forwards modo local (N4–N7)")
+    print("🧹 Limpiando port-forwards previos...")
+    kill_existing_port_forwards()
 
-    pf_processes["postgres"] = subprocess.Popen(
+    print("🔌 Iniciando port-forwards modo local (PT5 determinista)")
+
+    pf_processes["postgres"] = start_port_forward(
+        "PostgreSQL",
         "kubectl port-forward common-srvs-postgresql-0 -n common-srvs 5432:5432",
-        shell=True
+        5432
     )
 
-    pf_processes["vault"] = subprocess.Popen(
+    pf_processes["vault"] = start_port_forward(
+        "Vault",
         "kubectl port-forward common-srvs-vault-0 -n common-srvs 8200:8200",
-        shell=True
+        8200
     )
 
-    pf_processes["keycloak"] = subprocess.Popen(
+    pf_processes["keycloak"] = start_port_forward(
+        "Keycloak",
         "kubectl port-forward common-srvs-keycloak-0 -n common-srvs 8080:8080",
-        shell=True
+        8080
     )
 
-    time.sleep(5)
+    print("✔ Port-forwards activos y verificados")
 
 # ==========================================================
 # NIVEL 5
@@ -720,11 +758,17 @@ def nivel_8():
     # --------------------------------------------------
     print("🚀 Ejecutando auth-bootstrap.py...")
 
-    run(
-        [
-            "venv/bin/python",
-            "adapters/inesdata/integration/auth/auth-bootstrap.py"
-        ],
+    env = os.environ.copy()
+
+    env["KC_URL"] = "http://127.0.0.1:8080"
+    env["KEYCLOAK_ADMIN_PASSWORD"] = admin_password
+    env["KEYCLOAK_ADMIN_USER"] = "admin"
+    env["DATASPACE_REALM"] = "demo"
+    env["CONNECTOR_CLIENT_ID"] = "conn-oeg-demo"
+
+    subprocess.run(
+        ["venv/bin/python", "adapters/inesdata/integration/auth/auth-bootstrap.py"],
+        check=True,
         env=env
     )
 

@@ -48,6 +48,26 @@ FINAL_STEP2 = STEP2_DIR / f"values-{DATASPACE}.yaml"
 # UTILIDADES
 # =============================================================================
 
+def wait_for_keycloak_ready():
+    print("⏳ Esperando Keycloak READY en common-srvs...")
+
+    subprocess.run(
+        [
+            "kubectl",
+            "wait",
+            "--for=condition=ready",
+            "pod",
+            "-l",
+            "app.kubernetes.io/name=keycloak",
+            "-n",
+            "common-srvs",
+            "--timeout=120s"
+        ],
+        check=True
+    )
+
+    print("✔ Keycloak pod listo")
+
 def header(title: str):
     print("\n" + "=" * 80)
     print(title)
@@ -90,31 +110,14 @@ def check_preconditions():
 def create_dataspace():
     header(f"NIVEL 4 – Creación lógica del dataspace '{DATASPACE}'")
 
-    # Puede fallar si ya existe → permitido
+    # Esperar Keycloak antes de crear realm
+    wait_for_keycloak_ready()
+
     result = run(
         ["python3", "deployer.py", "dataspace", "create", DATASPACE],
         cwd=WORKDIR,
         check=False
     )
-
-    if result.returncode != 0:
-        print("⚠️ Estado parcial detectado (posible ejecución previa)")
-        print("➡ Limpieza controlada del dataspace")
-
-        run(
-            ["python3", "deployer.py", "dataspace", "delete", DATASPACE],
-            cwd=WORKDIR,
-            check=False
-        )
-
-        print("🔁 Reintentando creación (1/1)")
-        run(
-            ["python3", "deployer.py", "dataspace", "create", DATASPACE],
-            cwd=WORKDIR,
-            check=True
-        )
-
-    print("✓ Dataspace creado correctamente")
 
 # =============================================================================
 # FASE 5 – NORMALIZACIÓN DE ARTEFACTOS (SOLO VALUES)

@@ -392,7 +392,12 @@ def nivel_4():
     run("sudo apt install -y python3.10-venv")
     if not os.path.exists("venv"):
         run("python3.10 -m venv venv")
-    run("bash -c 'source venv/bin/activate && pip install -r runtime/workdir/inesdata-deployment/requirements.txt'")
+        run([
+        "venv/bin/pip",
+        "install",
+        "-r",
+        "runtime/workdir/inesdata-deployment/requirements.txt"
+    ])
 
     print("🔌 Iniciando port-forwards modo local (N4–N7)")
 
@@ -423,22 +428,55 @@ def nivel_5():
     os.environ["VAULT_ADDR"] = "http://127.0.0.1:8200"
     run("python3 adapters/inesdata/dataspace/dataspace-create.py")
 
-# ==========================================================
-# NIVEL 6
-# ==========================================================
+# =============================================================================
+# NIVEL 6 – Dataspace Deploy (Clean Mode)
+# =============================================================================
+
+import subprocess
+import sys
+
+
+def ensure_namespace(name):
+    """
+    Crea el namespace si no existe.
+    No usa '|| true'.
+    """
+    check = subprocess.run(
+        ["kubectl", "get", "namespace", name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+    if check.returncode != 0:
+        print(f"🆕 Namespace '{name}' no existe. Creándolo...")
+        subprocess.run(
+            ["kubectl", "create", "namespace", name],
+            check=True
+        )
+        print("✔ Namespace creado")
+    else:
+        print(f"✔ Namespace '{name}' ya existe")
+
 
 def nivel_6():
     print("\n== NIVEL 6: Dataspace Deploy ==")
 
-    run("kubectl create namespace demo || true")
-    if "keycloak" not in pf_processes:
-        raise RuntimeError("Port-forward Keycloak no activo")
-    wait_for_keycloak()
-    time.sleep(10)
-    run("python3 adapters/inesdata/dataspace/dataspace-deploy.py")
+    # --------------------------------------------------
+    # 1️⃣ Asegurar namespace
+    # --------------------------------------------------
+    ensure_namespace("demo")
 
-    run("kubectl get ns demo")
-    run("kubectl get pods -n demo")
+    # --------------------------------------------------
+    # 2️⃣ Ejecutar despliegue lógico
+    # --------------------------------------------------
+    print("🚀 Ejecutando dataspace-deploy.py...")
+
+    run([
+        "venv/bin/python",
+        "adapters/inesdata/dataspace/dataspace-deploy.py"
+    ])
+
+    print("✔ Dataspace desplegado correctamente")
 
 # ==========================================================
 # NIVEL 7
@@ -570,69 +608,141 @@ def nivel_7():
 
     print("\n✔ NIVEL 7 COMPLETADO EXITOSAMENTE")
 
+# =============================================================================
+# NIVEL 8 – Auth + Connector Setup (PT5 Clean Mode)
+# =============================================================================
+
+import subprocess
+import os
+import base64
+import sys
+import time
+
+
+def header(title):
+    print("\n" + "=" * 80)
+    print(title)
+    print("=" * 80)
+
+
+def run(cmd, env=None, cwd=None):
+    """
+    Ejecuta un comando de forma segura.
+    Soporta string o lista.
+    """
+
+    if isinstance(cmd, str):
+        cmd = cmd.strip().split()
+
+    print(f"\n▶ {' '.join(cmd)}")
+
+    subprocess.run(
+        cmd,
+        check=True,
+        env=env,
+        cwd=cwd
+    )
+
+def get_keycloak_admin_password():
+    cmd = (
+        "kubectl get secret common-srvs-keycloak -n common-srvs "
+        "-o jsonpath='{.data.admin-password}'"
+    )
+
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True,
+        check=True
+    )
+
+    if not result.stdout.strip():
+        sys.exit("❌ No se pudo obtener admin-password desde Kubernetes")
+
+    return base64.b64decode(result.stdout.strip()).decode()
+
+
+def wait_for_keycloak(timeout=60):
+    import requests
+
+    print("⏳ Verificando disponibilidad de Keycloak vía Ingress...")
+
+    start = time.time()
+
+    while time.time() - start < timeout:
+        try:
+            r = requests.get("http://127.0.0.1:8080/realms/master", timeout=3)
+            if r.status_code == 200:
+                print("✔ Keycloak accesible vía Ingress")
+                return
+        except:
+            pass
+
+        time.sleep(3)
+
+    sys.exit("❌ Keycloak no accesible tras esperar 60s")
+
+
 def nivel_8():
     header("NIVEL 8 – Auth + Connector Setup (PT5 Clean Mode)")
 
-    venv_python = os.path.abspath("venv/bin/python")
+    print("🔗 Keycloak URL: http://127.0.0.1:8080")
+    print("🔗 Vault URL: http://127.0.0.1:8200")
 
-    # ------------------------------------------------------------------
-    # 1️⃣ Configuración declarativa (NO hardcoded)
-    # ------------------------------------------------------------------
-    KEYCLOAK_URL = os.environ.get(
-        "KEYCLOAK_URL",
-        "http://localhost:8080"
-    )
+    # --------------------------------------------------
+    # 1️⃣ Esperar Keycloak listo
+    # --------------------------------------------------
+    wait_for_keycloak()
 
-    VAULT_ADDR = os.environ.get(
-        "VAULT_ADDR",
-        "http://localhost:8200"
-    )
+    # --------------------------------------------------
+    # 2️⃣ Obtener password real desde Kubernetes
+    # --------------------------------------------------
+    print("🔐 Obteniendo KEYCLOAK_ADMIN_PASSWORD desde Kubernetes...")
 
-    print(f"🔗 Keycloak URL: {KEYCLOAK_URL}")
-    print(f"🔗 Vault URL: {VAULT_ADDR}")
+    try:
+        admin_password = get_keycloak_admin_password()
+    except Exception as e:
+        sys.exit(f"❌ Error obteniendo password de Keycloak: {e}")
 
-    # ------------------------------------------------------------------
-    # 2️⃣ Verificar que Keycloak responde vía Ingress
-    # ------------------------------------------------------------------
-    print("⏳ Verificando disponibilidad de Keycloak vía Ingress...")
-
-    for i in range(40):
-        try:
-            r = requests.get(f"{KEYCLOAK_URL}/realms/master", timeout=3)
-            if r.status_code in [200, 302]:
-                print("✔ Keycloak accesible vía Ingress")
-                break
-        except requests.exceptions.RequestException:
-            pass
-
-        print(f"   [{i+1}/40] Esperando respuesta...", end="\r")
-        time.sleep(3)
-    else:
-        sys.exit("❌ Keycloak no responde vía Ingress")
-
-    # ------------------------------------------------------------------
-    # 3️⃣ Ejecutar bootstrap OIDC
-    # ------------------------------------------------------------------
+    # --------------------------------------------------
+    # 3️⃣ Preparar entorno para subprocess
+    # --------------------------------------------------
     env = os.environ.copy()
-    env["KEYCLOAK_URL"] = KEYCLOAK_URL
-    env["VAULT_ADDR"] = VAULT_ADDR
-    env["PYTHONUNBUFFERED"] = "1"
+    env["KEYCLOAK_ADMIN_PASSWORD"] = admin_password
 
+    # Opcional: garantizar coherencia de URLs
+    env["KEYCLOAK_ADMIN_USER"] = "admin"
+    env["KEYCLOAK_ADMIN_REALM"] = "master"
+
+    # --------------------------------------------------
+    # 4️⃣ Ejecutar auth-bootstrap
+    # --------------------------------------------------
     print("🚀 Ejecutando auth-bootstrap.py...")
-    subprocess.run(
-        [venv_python, "adapters/inesdata/integration/auth/auth-bootstrap.py"],
-        check=True,
+
+    run(
+        [
+            "venv/bin/python",
+            "adapters/inesdata/integration/auth/auth-bootstrap.py"
+        ],
         env=env
     )
 
+    # --------------------------------------------------
+    # 5️⃣ Ejecutar connector-setup
+    # --------------------------------------------------
     print("🚀 Ejecutando connector-setup.py...")
-    subprocess.run(
-        [venv_python, "adapters/inesdata/integration/connector/connector-setup.py"],
-        check=True,
+
+    run(
+        [
+            "venv/bin/python",
+            "adapters/inesdata/integration/connector/connector-setup.py"
+        ],
         env=env
     )
 
-    print("✔ NIVEL 8 COMPLETADO (PT5 ALIGNED)")
+    header("NIVEL 8 COMPLETADO")
+    print("✔ Auth + Connector Setup ejecutados correctamente")
 
 # ==========================================================
 # NIVEL 9

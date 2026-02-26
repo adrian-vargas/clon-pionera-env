@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+"""
+normalize-base.py
+
+NORMALIZACIÓN BASE – INESData (PIONERA)
+
+Responsabilidades:
+- Normalizar requirements.txt
+- Materializar common/values.yaml (SIN templating Helm)
+- Garantizar contrato Keycloak ↔ PostgreSQL (external DB)
+- Fijar baseline reproducible de imágenes (PostgreSQL, Keycloak, Keycloak Config CLI)
+- Generar Secret Keycloak DB externa compatible con chart Bitnami
+
+NO genera deployer.config (responsabilidad exclusiva del Nivel 3)
+"""
+
+import yaml
+import base64
+from pathlib import Path
+from datetime import datetime
+
+# =============================================================================
+# BASELINE REPRODUCIBLE DE DEPENDENCIAS PYTHON (A5.2)
+# =============================================================================
+
+BASELINE_REQUIREMENTS = [
+    "Jinja2==3.1.2",
+    "PyYAML==6.0.1",
+    "click==8.1.7",
+    "cryptography==42.0.8",
+    "jwcrypto==1.5.6",
+    "PyJWT==2.8.0",
+    "requests==2.32.3",
+    "requests[socks]",
+    "httpx==0.23.3",
+    "hvac==2.3.0",
+    "minio==7.2.7",
+    "psycopg2-binary==2.9.9",
+    "python-keycloak==3.9.0",
+    "Pillow==10.3.0",
+]
+
+# =============================================================================
+# BASELINE TECNOLÓGICO REPRODUCIBLE (IMÁGENES CRÍTICAS)
+# =============================================================================
+
+BASELINE_IMAGES = {
+    "postgresql": {
+        "repository": "bitnamilegacy/postgresql",
+        "tag": "16.3.0-debian-12-r9",
+    },
+    "keycloak": {
+        "repository": "bitnamilegacy/keycloak",
+        "tag": "24.0.4-debian-12-r1",
+    },
+    "keycloakConfigCli": {
+        "repository": "bitnamilegacy/keycloak-config-cli",
+        "tag": "5.12.0-debian-12-r4",
+    },
+}
+
+# =============================================================================
+# PATHS CANÓNICOS
+# =============================================================================
+
+ROOT = Path(__file__).resolve().parents[3]
+WORKDIR = ROOT / "runtime" / "workdir" / "inesdata-deployment"
+
+COMMON_DIR = WORKDIR / "common"
+VALUES_FILE = COMMON_DIR / "values.yaml"
+REQ_FILE = WORKDIR / "requirements.txt"
+KC_SECRET_FILE = WORKDIR / "keycloak-external-db-secret.yaml"
+
+# =============================================================================
+# UTILIDADES
+# =============================================================================
+
+def header(title: str):
+    print("\n" + "=" * 80)
+    print(title)
+    print("=" * 80)
+
+def backup(path: Path):
+    if not path.exists():
+        return
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    bkp = path.with_suffix(path.suffix + f".backup.{ts}")
+    bkp.write_text(path.read_text())
+    print(f"✓ Backup creado: {bkp}")
+
+def b64(val: str) -> str:
+    return base64.b64encode(val.encode()).decode()
+
+# =============================================================================
+# NORMALIZACIÓN DE requirements.txt
+# =============================================================================
+
+def normalize_requirements():
+    header("NORMALIZACIÓN – requirements.txt (BASELINE A5.2)")
+
+    backup(REQ_FILE)
+    REQ_FILE.write_text("\n".join(BASELINE_REQUIREMENTS) + "\n")
+
+    print("✓ requirements.txt fijado a baseline reproducible")
+    for dep in BASELINE_REQUIREMENTS:
+        print(f"  - {dep}")
+
+# =============================================================================
+# NORMALIZACIÓN DE common/values.yaml
+# =============================================================================
+
+def normalize_common_values():
+    header("NORMALIZACIÓN – common/values.yaml (CRÍTICA)")
+
+    backup(VALUES_FILE)
+    data = yaml.safe_load(VALUES_FILE.read_text())
+
+    # -------------------------------------------------------------------------
+    # PostgreSQL
+    # -------------------------------------------------------------------------
+
+    pg = data.setdefault("postgresql", {})
+    pg_auth = pg.setdefault("auth", {})
+
+    user = pg_auth.get("username", "keycloak")
+    pwd = pg_auth.get("password", "changeme")
+    db = pg_auth.get("database", "keycloak")
+
+    pg_img = pg.setdefault("image", {})
+    if pg_img.get("repository") != BASELINE_IMAGES["postgresql"]["repository"] or \
+       pg_img.get("tag") != BASELINE_IMAGES["postgresql"]["tag"]:
+        pg_img.update(BASELINE_IMAGES["postgresql"])
+        print("✓ Imagen PostgreSQL alineada con baseline reproducible")
+
+    # -------------------------------------------------------------------------
+    # Keycloak (external DB + imagen)
+    # -------------------------------------------------------------------------
+
+    kc = data.setdefault("keycloak", {})
+    kc["postgresql"] = {"enabled": False}
+
+    kc_ext = kc.setdefault("externalDatabase", {})
+    kc_ext.update({
+        "host": "common-srvs-postgresql",
+        "port": 5432,
+        "user": user,
+        "password": pwd,
+        "database": db,
+    })
+
+    kc_auth = kc.setdefault("auth", {})
+    kc_auth.setdefault("adminUser", "admin")
+    kc_auth.setdefault("adminPassword", pwd)
+
+    kc_img = kc.setdefault("image", {})
+    if kc_img.get("repository") != BASELINE_IMAGES["keycloak"]["repository"] or \
+       kc_img.get("tag") != BASELINE_IMAGES["keycloak"]["tag"]:
+        kc_img.update(BASELINE_IMAGES["keycloak"])
+        print("✓ Imagen Keycloak alineada con baseline reproducible")
+
+    # -------------------------------------------------------------------------
+    # Keycloak Config CLI (PUNTO CRÍTICO – FIX ImagePullBackOff)
+    # -------------------------------------------------------------------------
+
+    kc_cli = kc.setdefault("keycloakConfigCli", {})
+    kc_cli.setdefault("enabled", True)
+
+    kc_cli_img = kc_cli.setdefault("image", {})
+    if kc_cli_img.get("repository") != BASELINE_IMAGES["keycloakConfigCli"]["repository"] or \
+       kc_cli_img.get("tag") != BASELINE_IMAGES["keycloakConfigCli"]["tag"]:
+        kc_cli_img.update(BASELINE_IMAGES["keycloakConfigCli"])
+        print("✓ Imagen keycloak-config-cli alineada con baseline reproducible")
+
+    VALUES_FILE.write_text(yaml.dump(data, sort_keys=False))
+    print("✓ values.yaml materializado y coherente")
+
+# =============================================================================
+# GENERACIÓN DEL SECRET DE DB EXTERNA PARA KEYCLOAK
+# =============================================================================
+
+def generate_keycloak_db_secret():
+    header("NORMALIZACIÓN – Secret Keycloak external DB")
+
+    data = yaml.safe_load(VALUES_FILE.read_text())
+    pwd = data["postgresql"]["auth"]["password"]
+
+    secret = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {"name": "common-srvs-keycloak-db"},
+        "type": "Opaque",
+        "data": {"db-password": b64(pwd)},
+    }
+
+    KC_SECRET_FILE.write_text(yaml.dump(secret, sort_keys=False))
+    print(f"✓ Secret generado: {KC_SECRET_FILE}")
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+def main():
+    normalize_requirements()
+    normalize_common_values()
+    generate_keycloak_db_secret()
+
+    header("NORMALIZACIÓN BASE COMPLETADA")
+    print("✔ Infraestructura lista")
+    print("✔ Baseline de imágenes aplicado (PostgreSQL, Keycloak, Keycloak Config CLI)")
+    print("✔ deployer.config se genera SOLO en Nivel 3 (post-common.py)")
+    print("➡ Flujo correcto:")
+    print("  1. normalize-base.py")
+    print("  2. install.py")
+    print("  3. post-common.py")
+
+if __name__ == "__main__":
+    main()
